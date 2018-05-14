@@ -1,7 +1,11 @@
 from ctypes import *
 from my_debugger_defines import *
 
+import sys
+import time
+
 kernel32 = windll.kernel32
+
 
 class debugger():
 
@@ -9,6 +13,9 @@ class debugger():
 		self.h_process = None
 		self.pid = None
 		self.debugger_active = False
+		self.h_thread = None
+		self.context = None
+
 
 	def load(self, path_to_exe):
 
@@ -54,11 +61,12 @@ class debugger():
 		return h_process
 
 	def attach(self, pid):
+
 		self.h_process = self.open_process(pid)
 		if kernel32.DebugActiveProcess(pid):
 			self.debugger_active = True
 			self.pid = int(pid)
-			self.run()
+			# self.run()
 		else:
 			print "[-] unable to attach to the process"
 
@@ -69,8 +77,10 @@ class debugger():
 	def get_debug_event(self):
 		debug_event = DEBUG_EVENT()
 		continue_status = DBG_CONTINUE
-		if kernel32.WaitForDebugEvent(byref(debug_event),INFINITE):
+		if kernel32.WaitForDebugEvent(byref(debug_event),100):
 			kernel32.ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, continue_status)
+			# self.h_thread = self.open_thread(debug_event.dwThreadId)
+			# self.context = self.get_thread_context(h_thread=self.h_thread)
 
 	def detach(self):
 		if kernel32.DebugActiveProcessStop(self.pid):
@@ -79,7 +89,47 @@ class debugger():
 		else:
 			print "[!] detach process error"		
 
+	## thread part
 
+	def open_thread(self, thread_id):
+		h_thread = kernel32.OpenThread(THREAD_ALL_ACCESS, None, thread_id)
+		if h_thread is not None:
+			return h_thread
+		else:
+			print "[!] could not obtain a valid thread handle"
+			return False
+
+	def enumerate_threads(self):
+		thread_entry = THREADENTRY32()
+		thread_list = []
+		snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, self.pid)
+		if snapshot is not None:
+			thread_entry.dwSize = sizeof(thread_entry)
+			success = kernel32.Thread32First(snapshot, byref(thread_entry))
+
+			while success:
+				if thread_entry.th32OwnerProcessID == self.pid:
+					thread_list.append(thread_entry.th32ThreadID)
+				success = kernel32.Thread32Next(snapshot, byref(thread_entry))	
+			kernel32.CloseHandle(snapshot)
+			return thread_list
+		else:
+			return False
+
+	def get_thread_context(self, thread_id = None, h_thread = None):
+
+		context = CONTEXT()
+		context.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS
+
+		# obtain a handle to the thread
+
+		if h_thread is None:
+			self.h_thread = self.open_thread(thread_id)
+
+		if kernel32.GetThreadContext(self.h_thread, byref(context)):
+			return context
+		else:						
+			return False
 		
 
 
